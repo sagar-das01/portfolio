@@ -12,8 +12,7 @@ function App() {
   return (
     <>
         <div className="App">
-            <Breadcrumb />
-            
+            <Breadcrumb />           
             <Routes>
               <Route path='/' Component = { Home }/>
               <Route path='/contacts' Component={ Contacts }/>
@@ -21,9 +20,8 @@ function App() {
               <Route path='/projects' Component={ Projects }/>
               <Route path='/research' Component={ Research }/>
             </Routes>
-
-          <Footer />
         </div>
+        <Footer />
     </> 
   );
 }
