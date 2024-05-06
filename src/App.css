@@ -1,3 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 .App {
   text-align: center;
 }
@@ -13,20 +17,38 @@
   }
 }
 
-.App-header {
+
+.App-footer {
+  height: 1.1cm;
+  position: absolute;
+  bottom: 0;
+  width: 100%;
   background-color: #282c34;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
   color: white;
+  padding-top: 0.2cm;
 }
 
 .App-link {
   color: #61dafb;
 }
+
+.bc {
+
+  display: flex;
+  flex-direction: row;
+  justify-content: space-evenly;
+  margin: 0 auto;
+  padding: 0 auto;
+  font-weight: bold;
+}
+
+.bc-container {
+  height: 1.5cm;
+  background-color: #282c34;
+  color: white;
+  padding-top: 0.3cm;
+}
+
 
 @keyframes App-logo-spin {
   from {

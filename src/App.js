@@ -1,24 +1,30 @@
-import logo from './logo.svg';
 import './App.css';
+import Breadcrumb from './Breadcrumb/Breadcrumb';
+import { Route, Routes} from 'react-router-dom';
+import Courses from './Screens/Courses';
+import Contacts from './Screens/Contacts';
+import Projects from './Screens/Projects';
+import Research from './Screens/Research';
+import Home from './Screens/Home';
+import Footer from './Footer/Footer';
 
 function App() {
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
-    </div>
+    <>
+        <div className="App">
+            <Breadcrumb />
+            
+            <Routes>
+              <Route path='/' Component = { Home }/>
+              <Route path='/contacts' Component={ Contacts }/>
+              <Route path='/courses' Component={ Courses }/>
+              <Route path='/projects' Component={ Projects }/>
+              <Route path='/research' Component={ Research }/>
+            </Routes>
+
+          <Footer />
+        </div>
+    </> 
   );
 }
 
