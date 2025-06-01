@@ -1,9 +1,12 @@
+/* src/App.css */
+
+/* General App styling (some already exists) */
 .App {
   text-align: center;
 }
 
 .App-logo {
-  height: 40vmin;
+  height: 15vmin; /* Adjusted from 40vmin for a smaller logo */
   pointer-events: none;
 }
 
@@ -15,18 +18,74 @@
 
 .App-header {
   background-color: #282c34;
-  min-height: 100vh;
+  min-height: 25vh; /* Adjusted from 100vh to make space for content below */
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   font-size: calc(10px + 2vmin);
   color: white;
+  padding-bottom: 20px; /* Added padding */
 }
 
 .App-link {
   color: #61dafb;
+  text-decoration: none; /* Ensure links are not underlined by default */
 }
+
+.App-link:hover {
+  text-decoration: underline; /* Underline on hover for better UX */
+}
+
+/* Navigation styles */
+nav.mt-3.mb-3 {
+  margin-top: 1rem !important; /* Bootstrap class equivalent */
+  margin-bottom: 1rem !important; /* Bootstrap class equivalent */
+}
+
+nav .App-link {
+  margin-right: 15px;
+  font-size: 1.2rem; /* Slightly larger font for nav links */
+}
+
+nav .App-link:last-child {
+  margin-right: 0;
+}
+
+/* Main content area styling */
+main {
+  padding: 20px;
+}
+
+/* Project Card specific styling (if any additional is needed beyond Bootstrap) */
+/* Bootstrap card classes should handle most of it. */
+/* For example, to ensure images are responsive within cards if not already: */
+.card-img-top {
+  width: 100%;
+  height: 200px; /* Fixed height for uniformity */
+  object-fit: cover; /* Ensures image covers the area, might crop */
+}
+
+/* Ensure cards in a row have similar heights if content varies */
+.h-100 {
+    height: 100% !important; /* Bootstrap class for full height */
+}
+
+/* Welcome message styling */
+.container.mt-5 h1, .container.mt-5 p {
+  color: #333; /* Darker text color for better readability on light background */
+}
+
+/* Center align text for headings in Projects page */
+.projects-title {
+    text-align: center;
+    margin-bottom: 2rem; /* Add some space below the title */
+    color: #333;
+}
+
+/* Ensure the footer from public/index.html is visible */
+/* If the body has overflow-hidden and hei (height 100vh) this might be an issue */
+/* We will assume for now that the footer is visible or will be handled separately if it's not */
 
 @keyframes App-logo-spin {
   from {
