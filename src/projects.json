@@ -1,0 +1,32 @@
+[
+  {
+    "id": 1,
+    "title": "Project Alpha",
+    "description": "This is the description for Project Alpha. It's a revolutionary new platform.",
+    "imageUrl": "https://via.placeholder.com/300x200.png?text=Project+Alpha"
+  },
+  {
+    "id": 2,
+    "title": "Project Beta",
+    "description": "Project Beta aims to solve a critical problem in the industry with innovative solutions.",
+    "imageUrl": "https://via.placeholder.com/300x200.png?text=Project+Beta"
+  },
+  {
+    "id": 3,
+    "title": "Project Gamma",
+    "description": "A cutting-edge project focusing on next-generation technologies.",
+    "imageUrl": "https://via.placeholder.com/300x200.png?text=Project+Gamma"
+  },
+  {
+    "id": 4,
+    "title": "Project Delta",
+    "description": "Project Delta is all about enhancing user experience and creating intuitive interfaces.",
+    "imageUrl": "https://via.placeholder.com/300x200.png?text=Project+Delta"
+  },
+  {
+    "id": 5,
+    "title": "Project Epsilon",
+    "description": "This project explores new frontiers in data science and machine learning.",
+    "imageUrl": "https://via.placeholder.com/300x200.png?text=Project+Epsilon"
+  }
+]
