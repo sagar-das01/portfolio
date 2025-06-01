@@ -2,7 +2,13 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import logo from './logo.svg';
 import './App.css';
-import Projects from './Projects'; // Import the Projects component
+import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
+import Header from './components/Header';
+import Home from './components/Home';
+import About from './components/About';
+import Projects from './components/Projects';
+import Contact from './components/Contact';
+import Footer from './components/Footer';
 
 function App() {
   return (
@@ -38,6 +44,7 @@ function App() {
             } />
           </Routes>
         </main>
+        <Footer />
       </div>
     </Router>
   );
