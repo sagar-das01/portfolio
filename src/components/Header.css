@@ -1,0 +1,33 @@
+/* src/components/Header.css */
+.App-header {
+  background-color: #282c34; /* Dark background for header */
+  padding: 1rem 0;
+  color: white;
+}
+
+.App-header nav ul {
+  list-style-type: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  justify-content: center; /* Center navigation items */
+  align-items: center;
+}
+
+.App-header nav ul li {
+  margin: 0 15px; /* Space out navigation items */
+}
+
+.App-header nav ul li a {
+  color: white;
+  text-decoration: none;
+  font-size: 1.1rem;
+  padding: 5px 10px;
+  border-radius: 4px;
+  transition: background-color 0.3s ease;
+}
+
+.App-header nav ul li a:hover,
+.App-header nav ul li a.active { /* Example for active link styling */
+  background-color: #4a5058; /* Slightly lighter background on hover/active */
+}

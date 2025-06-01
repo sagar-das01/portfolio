@@ -1,0 +1,31 @@
+version: '3.8' # Specifies the Docker Compose file format version
+
+services:
+  # Development service
+  dev:
+    build:
+      context: . # Specifies the build context (the current directory)
+      dockerfile: Dockerfile.dev # Specifies the Dockerfile for development
+    ports:
+      - "3000:3000" # Maps port 3000 on the host to port 3000 in the container
+    volumes:
+      - ./src:/app/src # Mounts the src directory for live reloading
+      - ./public:/app/public # Mounts the public directory
+    environment:
+      - NODE_ENV=development # Sets the environment to development
+      - CHOKIDAR_USEPOLLING=true # Optional: Helps with file watching in some environments
+    # command: npm start # This is usually inherited from Dockerfile.dev CMD
+
+  # Production service
+  prod:
+    build:
+      context: .
+      dockerfile: Dockerfile # Specifies the Dockerfile for production (the one named Dockerfile)
+    ports:
+      - "80:80" # Maps port 80 on the host to port 80 in the container (standard HTTP)
+      # You might want to use a different host port if 80 is already in use, e.g., "8080:80"
+    # command: nginx -g 'daemon off;' # This is usually inherited from Dockerfile CMD
+
+# Optional: Define named volumes if needed for persisting data (not typical for frontend-only)
+# volumes:
+#   my-data:
