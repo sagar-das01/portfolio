@@ -1,0 +1,79 @@
+# Workflow for building and deploying a Next.js site to Google Cloud.
+#
+# To configure this workflow:
+#
+# 1. Ensure the required Google Cloud APIs are enabled:
+#  - Cloud Functions API
+#  - Cloud Build API
+#  - Artifact Registry API
+#  - Cloud Run API
+#  - Cloud Storage API
+#
+# 2. Create and configure the necessary Google Cloud resources:
+#  - Cloud Functions: For server-side rendering and API routes.
+#  - Cloud Build: To build the Next.js application and create a Docker image.
+#  - Artifact Registry: To store the Docker image.
+#  - Cloud Run: To deploy and serve the Next.js application.
+#  - Cloud Storage: To store static assets.
+#
+# 3. Create a Google Cloud service account with the required permissions:
+#  - Cloud Functions Developer
+#  - Cloud Build Editor
+#  - Artifact Registry Writer
+#  - Cloud Run Admin
+#  - Storage Object Admin
+#
+# 4. Store the service account key in GitHub secrets:
+#  - `GCP_SA_KEY`: The JSON key for the Google Cloud service account.
+#
+# 5. Store the project ID in GitHub secrets:
+#  - `GCP_PROJECT_ID`: The ID of the Google Cloud project.
+#
+# 6. Configure the workflow environment variables:
+#  - `REGION`: The Google Cloud region for the resources.
+#  - `GAR_LOCATION`: The location for the Artifact Registry repository.
+#  - `FUNCTION_NAME`: The name of the Cloud Function.
+#  - `SERVICE_NAME`: The name of the Cloud Run service.
+#  - `BUCKET_NAME`: The name of the Cloud Storage bucket.
+#  - `IMAGE_NAME`: The name of the Docker image.
+#
+# For more information, refer to the Google Cloud documentation.
+
+name: Build and Deploy to Google Cloud
+
+on:
+  push:
+    branches:
+      - master
+
+env:
+  GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+  REGION: "us-central1"
+  GAR_LOCATION: "us-central1"
+  FUNCTION_NAME: "nextjs-function"
+  SERVICE_NAME: "nextjs-service"
+  BUCKET_NAME: "your-nextjs-bucket-name" # TODO: Replace with your bucket name
+  IMAGE_NAME: "nextjs-app"
+
+jobs:
+  deploy-to-vm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v1
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
+      - name: Deploy to VM
+        run: |
+          # VM_IP="YOUR_VM_IP_ADDRESS_HERE" # Add your VM's IP address here
+          gcloud compute ssh your-vm-name --zone your-vm-zone --command="echo 'Deployment placeholder: Update code and restart services on VM'"
+          # Add actual deployment commands below, for example:
+          # gcloud compute ssh your-vm-name --zone your-vm-zone --command="cd /path/to/your/app && git pull && docker-compose up -d --build"
