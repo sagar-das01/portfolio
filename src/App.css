@@ -8,6 +8,8 @@
 .App-logo {
   height: 15vmin; /* Adjusted from 40vmin for a smaller logo */
   pointer-events: none;
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
@@ -112,6 +114,7 @@ main {
   to {
     transform: rotate(360deg);
   }
+}
 main {
   padding: 20px;
   min-height: 70vh; /* Ensure footer is pushed down */
@@ -161,3 +164,4 @@ main {
 #contact form button:hover {
   background-color: #5a626e;
 }
+

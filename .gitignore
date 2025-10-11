@@ -21,3 +21,30 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Security - NEVER commit these files
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.cer
+*.der
+portfolio-key.json
+*-key.json
+gcp-*.json
+service-account*.json
+.ssh/
+id_rsa*
+*.private
+*.secret
+.env
+.env.*
+secrets/
+credentials/
+
+# GCP and deployment related sensitive files
+gcloud-auth.json
+gcp-service-account.json
+vm-ssh-key*
+deployment-secrets*
