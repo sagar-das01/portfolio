@@ -42,19 +42,75 @@ jobs:
         id: vars
         run: |
           if [ "${{ github.event_name }}" = "workflow_run" ]; then
-            # Get version from the workflow run that triggered this
-            VERSION=$(echo "${{ github.event.workflow_run.head_branch }}" | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' || echo "latest")
-            if [ "$VERSION" = "latest" ]; then
-              # Get latest release tag
-              VERSION=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases/latest" | jq -r '.tag_name')
+            # For workflow_run, get the release tag that triggered the build workflow
+            echo "Getting version from workflow run context..."
+            echo "Head branch: ${{ github.event.workflow_run.head_branch }}"
+            echo "Head commit: ${{ github.event.workflow_run.head_sha }}"
+            
+            # Get the latest release tag
+            VERSION=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/latest" | \
+              jq -r '.tag_name // empty')
+            
+            if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+              echo "No releases found, checking for tags..."
+              VERSION=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                "https://api.github.com/repos/${{ github.repository }}/tags" | \
+                jq -r '.[0].name // empty')
             fi
+            
+            if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+              echo "❌ No version tags found in repository"
+              exit 1
+            fi
+            
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             VERSION="${{ github.event.inputs.version }}"
+            if [ "$VERSION" = "latest" ]; then
+              echo "Resolving 'latest' to actual release tag..."
+              # Get the actual latest release tag
+              VERSION=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                "https://api.github.com/repos/${{ github.repository }}/releases/latest" | \
+                jq -r '.tag_name // empty')
+              
+              if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+                echo "No releases found, checking for latest tag..."
+                VERSION=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                  "https://api.github.com/repos/${{ github.repository }}/tags" | \
+                  jq -r '.[0].name // empty')
+                
+                if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+                  echo "❌ No releases or tags found and 'latest' was specified"
+                  echo "Available options:"
+                  echo "1. Create a release first"
+                  echo "2. Specify an exact version tag"
+                  exit 1
+                fi
+              fi
+              echo "✅ Resolved 'latest' to version: $VERSION"
+            else
+              # Validate that the specified version exists
+              echo "Validating specified version: $VERSION"
+              RELEASE_CHECK=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                "https://api.github.com/repos/${{ github.repository }}/releases/tags/$VERSION")
+              
+              if [ "$(echo "$RELEASE_CHECK" | jq -r '.message // empty')" = "Not Found" ]; then
+                echo "❌ Specified version $VERSION not found"
+                echo "Available releases:"
+                curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                  "https://api.github.com/repos/${{ github.repository }}/releases" | \
+                  jq -r '.[].tag_name' | head -5
+                exit 1
+              fi
+              echo "✅ Version $VERSION found"
+            fi
           else
-            VERSION="latest"
+            echo "❌ Unsupported event type: ${{ github.event_name }}"
+            exit 1
           fi
+          
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Deploying version: $VERSION"
+          echo "✅ Final version to deploy: $VERSION"
 
       - name: Check VM connectivity
         run: |
@@ -91,20 +147,31 @@ jobs:
       - name: Wait for build artifacts and download
         run: |
           VERSION="${{ steps.vars.outputs.version }}"
-          echo "Waiting for build artifacts for version: $VERSION"
+          echo "Looking for build artifacts for version: $VERSION"
+          
+          # First, verify the release exists
+          echo "Verifying release $VERSION exists..."
+          RELEASE_DATA=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/$VERSION")
+          
+          if [ "$(echo "$RELEASE_DATA" | jq -r '.message // empty')" = "Not Found" ]; then
+            echo "❌ Release $VERSION not found"
+            echo "Available releases:"
+            curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/repos/${{ github.repository }}/releases" | \
+              jq -r '.[].tag_name' | head -5
+            exit 1
+          fi
+          
+          echo "✅ Release $VERSION found"
           
           # Wait up to 5 minutes for build artifacts to be available
           for i in {1..30}; do
             echo "Checking for build artifacts (attempt $i/30)..."
             
-            # Check if build artifact exists in release
+            # Get fresh release data
             RELEASE_DATA=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
               "https://api.github.com/repos/${{ github.repository }}/releases/tags/$VERSION")
-            
-            if [ "$(echo "$RELEASE_DATA" | jq -r '.message // empty')" = "Not Found" ]; then
-              echo "❌ Release $VERSION not found"
-              exit 1
-            fi
             
             ASSET_URL=$(echo "$RELEASE_DATA" | jq -r '.assets[] | select(.name | contains("portfolio-build")) | .browser_download_url' | head -1)
             
@@ -112,12 +179,14 @@ jobs:
               echo "✅ Build artifact found: $ASSET_URL"
               
               # Download the build artifact
+              echo "Downloading build artifact..."
               curl -L -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
                 "$ASSET_URL" -o "/tmp/portfolio-build-$VERSION.zip"
               
               # Verify download
               if [ -f "/tmp/portfolio-build-$VERSION.zip" ] && [ -s "/tmp/portfolio-build-$VERSION.zip" ]; then
-                echo "✅ Build artifact downloaded successfully ($(ls -lh /tmp/portfolio-build-$VERSION.zip | awk '{print $5}'))"
+                FILE_SIZE=$(ls -lh /tmp/portfolio-build-$VERSION.zip | awk '{print $5}')
+                echo "✅ Build artifact downloaded successfully ($FILE_SIZE)"
                 break
               else
                 echo "❌ Downloaded file is empty or corrupted"
@@ -125,7 +194,7 @@ jobs:
               fi
             else
               echo "Build artifact not yet available, waiting 10 seconds..."
-              echo "Available assets in this release:"
+              echo "Current assets in release $VERSION:"
               echo "$RELEASE_DATA" | jq -r '.assets[].name // "No assets found"'
               sleep 10
             fi
@@ -134,6 +203,11 @@ jobs:
               echo "❌ Timeout: Build artifact not found after 5 minutes"
               echo "Final check - Available assets in release $VERSION:"
               echo "$RELEASE_DATA" | jq -r '.assets[].name // "No assets found"'
+              
+              echo "All available releases:"
+              curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                "https://api.github.com/repos/${{ github.repository }}/releases" | \
+                jq -r '.[].tag_name' | head -10
               exit 1
             fi
           done
