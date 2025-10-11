@@ -42,6 +42,7 @@ id_rsa*
 .env.*
 secrets/
 credentials/
+.idea*
 
 # GCP and deployment related sensitive files
 gcloud-auth.json
