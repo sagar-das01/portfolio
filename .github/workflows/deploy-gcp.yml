@@ -1,1 +1,172 @@
-name: Deploy to Google Cloud VMon:  release:    types: [published]  workflow_dispatch:    inputs:      version:        description: 'Version to deploy (e.g., v1.2.3)'        required: true        default: 'latest'permissions:  contents: readjobs:  deploy:    name: Deploy to Production VM    runs-on: ubuntu-latest    steps:      - name: Checkout code        uses: actions/checkout@v4      - name: Setup Google Cloud CLI        uses: google-github-actions/setup-gcloud@v1        with:          service_account_key: ${{ secrets.GCP_SA_KEY }}          project_id: ${{ secrets.GCP_PROJECT_ID }}      - name: Configure SSH        run: |          mkdir -p ~/.ssh          echo "${{ secrets.GCP_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa          chmod 600 ~/.ssh/id_rsa          ssh-keyscan -H ${{ secrets.GCP_VM_IP }} >> ~/.ssh/known_hosts      - name: Prepare deployment variables        id: vars        run: |          if [ "${{ github.event_name }}" = "release" ]; then            VERSION="${{ github.event.release.tag_name }}"          else            VERSION="${{ github.event.inputs.version }}"          fi          echo "version=$VERSION" >> $GITHUB_OUTPUT          echo "Deploying version: $VERSION"      - name: Check VM connectivity        run: |          ssh -o ConnectTimeout=30 -i ~/.ssh/id_rsa ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} "echo 'VM connection successful'"      - name: Transfer deployment scripts        run: |          # Create scripts directory on VM          ssh -i ~/.ssh/id_rsa ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} "sudo mkdir -p /opt/portfolio-scripts"                    # Transfer all scripts          scp -i ~/.ssh/id_rsa scripts/*.sh ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }}:/tmp/                    # Move scripts to permanent location and set permissions          ssh -i ~/.ssh/id_rsa ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} "            sudo mv /tmp/*.sh /opt/portfolio-scripts/            sudo chmod +x /opt/portfolio-scripts/*.sh            sudo chown root:root /opt/portfolio-scripts/*.sh          "      - name: Check current deployment status        id: current-status        run: |          CURRENT_VERSION=$(ssh -i ~/.ssh/id_rsa ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} "            if [ -f /var/www/portfolio/package.json ]; then              grep '\"version\"' /var/www/portfolio/package.json | cut -d'\"' -f4            else              echo 'none'            fi          ")          echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT          echo "Current version on VM: $CURRENT_VERSION"      - name: Backup current deployment        if: steps.current-status.outputs.current != 'none'        run: |          ssh -i ~/.ssh/id_rsa ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} "            sudo mkdir -p /var/backups/portfolio            if [ -d /var/www/portfolio ] && [ \"\$(ls -A /var/www/portfolio)\" ]; then              sudo cp -r /var/www/portfolio /var/backups/portfolio/pre-${{ steps.vars.outputs.version }}-backup-\$(date +%Y%m%d-%H%M%S)              echo 'Backup created successfully'            fi          "      - name: Deploy new version        run: |          ssh -i ~/.ssh/id_rsa ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} "            export GITHUB_REPOSITORY='${{ github.repository }}'            export GITHUB_TOKEN='${{ secrets.GITHUB_TOKEN }}'            sudo -E /opt/portfolio-scripts/deploy.sh ${{ steps.vars.outputs.version }}          "      - name: Verify deployment        run: |          # Wait for services to stabilize          sleep 10                    # Check if the application is accessible          VM_STATUS=$(ssh -i ~/.ssh/id_rsa ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} "            curl -f -s -o /dev/null -w '%{http_code}' http://localhost || echo 'failed'          ")                    if [ "$VM_STATUS" = "200" ]; then            echo "✅ Deployment verification successful"            echo "Application is responding with HTTP 200"          else            echo "❌ Deployment verification failed"            echo "HTTP Status: $VM_STATUS"            exit 1          fi      - name: Get deployment info        id: deployment-info        run: |          DEPLOYED_VERSION=$(ssh -i ~/.ssh/id_rsa ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} "            if [ -f /var/www/portfolio/package.json ]; then              grep '\"version\"' /var/www/portfolio/package.json | cut -d'\"' -f4            else              echo 'unknown'            fi          ")                    VM_IP="${{ secrets.GCP_VM_IP }}"                    echo "deployed_version=$DEPLOYED_VERSION" >> $GITHUB_OUTPUT          echo "vm_ip=$VM_IP" >> $GITHUB_OUTPUT      - name: Rollback on failure        if: failure()        run: |          echo "🔄 Deployment failed, attempting rollback..."          ssh -i ~/.ssh/id_rsa ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} "            LATEST_BACKUP=\$(sudo ls -t /var/backups/portfolio/ | head -n 1)            if [ -n \"\$LATEST_BACKUP\" ]; then              echo \"Rolling back to: \$LATEST_BACKUP\"              sudo systemctl stop nginx || true              sudo rm -rf /var/www/portfolio/*              sudo cp -r /var/backups/portfolio/\$LATEST_BACKUP/* /var/www/portfolio/              sudo chown -R www-data:www-data /var/www/portfolio              sudo systemctl start nginx              echo \"Rollback completed\"            else              echo \"No backup found for rollback\"            fi          "      - name: Send deployment notification        if: success()        run: |          echo "🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY          echo "" >> $GITHUB_STEP_SUMMARY          echo "- **Repository:** ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY          echo "- **Version Deployed:** ${{ steps.vars.outputs.version }}" >> $GITHUB_STEP_SUMMARY          echo "- **Previous Version:** ${{ steps.current-status.outputs.current }}" >> $GITHUB_STEP_SUMMARY          echo "- **VM IP:** ${{ steps.deployment-info.outputs.vm_ip }}" >> $GITHUB_STEP_SUMMARY          echo "- **Deployment Time:** $(date -u)" >> $GITHUB_STEP_SUMMARY          echo "" >> $GITHUB_STEP_SUMMARY          echo "### 🔗 Access Links:" >> $GITHUB_STEP_SUMMARY          echo "- **Production Site:** http://${{ steps.deployment-info.outputs.vm_ip }}" >> $GITHUB_STEP_SUMMARY          echo "- **Release Page:** https://github.com/${{ github.repository }}/releases/tag/${{ steps.vars.outputs.version }}" >> $GITHUB_STEP_SUMMARY      - name: Clean up SSH keys        if: always()        run: |          rm -f ~/.ssh/id_rsa
+name: Deploy to Google Cloud VM
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to deploy (e.g., v1.2.3)'
+        required: true
+        default: 'latest'
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to Production VM
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.GCP_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.GCP_VM_IP }} >> ~/.ssh/known_hosts
+
+      - name: Prepare deployment variables
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            VERSION="${{ github.event.release.tag_name }}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Deploying version: $VERSION"
+
+      - name: Check VM connectivity
+        run: |
+          ssh -o ConnectTimeout=30 -i ~/.ssh/id_rsa ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} "echo 'VM connection successful'"
+
+      - name: Transfer deployment scripts
+        run: |
+          # Create scripts directory on VM
+          ssh -i ~/.ssh/id_rsa ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} "sudo mkdir -p /opt/portfolio-scripts"
+          
+          # Transfer all scripts
+          scp -i ~/.ssh/id_rsa scripts/*.sh ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }}:/tmp/
+          
+          # Move scripts to permanent location and set permissions
+          ssh -i ~/.ssh/id_rsa ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} "
+            sudo mv /tmp/*.sh /opt/portfolio-scripts/
+            sudo chmod +x /opt/portfolio-scripts/*.sh
+            sudo chown root:root /opt/portfolio-scripts/*.sh
+          "
+
+      - name: Check current deployment status
+        id: current-status
+        run: |
+          CURRENT_VERSION=$(ssh -i ~/.ssh/id_rsa ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} "
+            if [ -f /var/www/portfolio/package.json ]; then
+              grep '\"version\"' /var/www/portfolio/package.json | cut -d'\"' -f4
+            else
+              echo 'none'
+            fi
+          ")
+          echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "Current version on VM: $CURRENT_VERSION"
+
+      - name: Backup current deployment
+        if: steps.current-status.outputs.current != 'none'
+        run: |
+          ssh -i ~/.ssh/id_rsa ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} "
+            sudo mkdir -p /var/backups/portfolio
+            if [ -d /var/www/portfolio ] && [ \"\$(ls -A /var/www/portfolio)\" ]; then
+              sudo cp -r /var/www/portfolio /var/backups/portfolio/pre-${{ steps.vars.outputs.version }}-backup-\$(date +%Y%m%d-%H%M%S)
+              echo 'Backup created successfully'
+            fi
+          "
+
+      - name: Deploy new version
+        run: |
+          ssh -i ~/.ssh/id_rsa ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} "
+            export GITHUB_REPOSITORY='${{ github.repository }}'
+            export GITHUB_TOKEN='${{ secrets.GITHUB_TOKEN }}'
+            sudo -E /opt/portfolio-scripts/deploy.sh ${{ steps.vars.outputs.version }}
+          "
+
+      - name: Verify deployment
+        run: |
+          # Wait for services to stabilize
+          sleep 10
+          
+          # Check if the application is accessible
+          VM_STATUS=$(ssh -i ~/.ssh/id_rsa ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} "
+            curl -f -s -o /dev/null -w '%{http_code}' http://localhost || echo 'failed'
+          ")
+          
+          if [ "$VM_STATUS" = "200" ]; then
+            echo "✅ Deployment verification successful"
+            echo "Application is responding with HTTP 200"
+          else
+            echo "❌ Deployment verification failed"
+            echo "HTTP Status: $VM_STATUS"
+            exit 1
+          fi
+
+      - name: Get deployment info
+        id: deployment-info
+        run: |
+          DEPLOYED_VERSION=$(ssh -i ~/.ssh/id_rsa ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} "
+            if [ -f /var/www/portfolio/package.json ]; then
+              grep '\"version\"' /var/www/portfolio/package.json | cut -d'\"' -f4
+            else
+              echo 'unknown'
+            fi
+          ")
+          
+          VM_IP="${{ secrets.GCP_VM_IP }}"
+          
+          echo "deployed_version=$DEPLOYED_VERSION" >> $GITHUB_OUTPUT
+          echo "vm_ip=$VM_IP" >> $GITHUB_OUTPUT
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "🔄 Deployment failed, attempting rollback..."
+          ssh -i ~/.ssh/id_rsa ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} "
+            LATEST_BACKUP=\$(sudo ls -t /var/backups/portfolio/ | head -n 1)
+            if [ -n \"\$LATEST_BACKUP\" ]; then
+              echo \"Rolling back to: \$LATEST_BACKUP\"
+              sudo systemctl stop nginx || true
+              sudo rm -rf /var/www/portfolio/*
+              sudo cp -r /var/backups/portfolio/\$LATEST_BACKUP/* /var/www/portfolio/
+              sudo chown -R www-data:www-data /var/www/portfolio
+              sudo systemctl start nginx
+              echo \"Rollback completed\"
+            else
+              echo \"No backup found for rollback\"
+            fi
+          "
+
+      - name: Send deployment notification
+        if: success()
+        run: |
+          echo "🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository:** ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version Deployed:** ${{ steps.vars.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Previous Version:** ${{ steps.current-status.outputs.current }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **VM IP:** ${{ steps.deployment-info.outputs.vm_ip }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deployment Time:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔗 Access Links:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Production Site:** http://${{ steps.deployment-info.outputs.vm_ip }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release Page:** https://github.com/${{ github.repository }}/releases/tag/${{ steps.vars.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Clean up SSH keys
+        if: always()
+        run: |
+          rm -f ~/.ssh/id_rsa
