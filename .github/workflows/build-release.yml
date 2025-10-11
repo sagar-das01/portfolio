@@ -28,18 +28,43 @@ jobs:
       - name: Build project
         run: yarn build
 
+      - name: Get release information
+        id: release-info
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG_NAME="${{ github.event.release.tag_name }}"
+            RELEASE_ID="${{ github.event.release.id }}"
+          else
+            # For manual dispatch, get the latest release
+            TAG_NAME=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases/latest" | jq -r '.tag_name')
+            RELEASE_ID=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases/latest" | jq -r '.id')
+          fi
+          
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "release_id=$RELEASE_ID" >> $GITHUB_OUTPUT
+          echo "Tag name: $TAG_NAME"
+          echo "Release ID: $RELEASE_ID"
+
       - name: Create build archive
         run: |
           cd build
-          zip -r ../portfolio-build-${{ github.event.release.tag_name }}.zip .
+          zip -r ../portfolio-build-${{ steps.release-info.outputs.tag_name }}.zip .
           cd ..
+          
+          # Verify the archive was created
+          ls -la portfolio-build-*.zip
 
       - name: Upload build artifact to release
-        uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: ./portfolio-build-${{ github.event.release.tag_name }}.zip
-          asset_name: portfolio-build-${{ github.event.release.tag_name }}.zip
-          asset_content_type: application/zip
+        run: |
+          TAG_NAME="${{ steps.release-info.outputs.tag_name }}"
+          ASSET_PATH="./portfolio-build-${TAG_NAME}.zip"
+          ASSET_NAME="portfolio-build-${TAG_NAME}.zip"
+          
+          echo "Uploading $ASSET_NAME to release $TAG_NAME"
+          
+          # Upload using GitHub CLI
+          gh release upload "$TAG_NAME" "$ASSET_PATH" --clobber
+          
+          echo "✅ Successfully uploaded build artifact to release"

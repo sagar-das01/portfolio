@@ -78,6 +78,44 @@ jobs:
           echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
           echo "Current version on VM: $CURRENT_VERSION"
 
+      - name: Wait for build artifacts and download
+        run: |
+          VERSION="${{ steps.vars.outputs.version }}"
+          echo "Waiting for build artifacts for version: $VERSION"
+          
+          # Wait up to 10 minutes for build artifacts to be available
+          for i in {1..60}; do
+            echo "Checking for build artifacts (attempt $i/60)..."
+            
+            # Check if build artifact exists in release
+            ASSET_URL=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/tags/$VERSION" | \
+              jq -r '.assets[] | select(.name | contains("portfolio-build")) | .browser_download_url' | head -1)
+            
+            if [ "$ASSET_URL" != "null" ] && [ -n "$ASSET_URL" ]; then
+              echo "✅ Build artifact found: $ASSET_URL"
+              
+              # Download the build artifact
+              curl -L -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                "$ASSET_URL" -o "/tmp/portfolio-build-$VERSION.zip"
+              
+              echo "✅ Build artifact downloaded successfully"
+              break
+            else
+              echo "Build artifact not yet available, waiting 10 seconds..."
+              sleep 10
+            fi
+            
+            if [ $i -eq 60 ]; then
+              echo "❌ Timeout: Build artifact not found after 10 minutes"
+              echo "Available assets in release:"
+              curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                "https://api.github.com/repos/${{ github.repository }}/releases/tags/$VERSION" | \
+                jq -r '.assets[] | .name'
+              exit 1
+            fi
+          done
+
       - name: Backup current deployment
         if: steps.current-status.outputs.current != 'none'
         run: |
@@ -89,12 +127,42 @@ jobs:
             fi
           "
 
-      - name: Deploy new version
+      - name: Transfer and deploy new version
         run: |
+          VERSION="${{ steps.vars.outputs.version }}"
+          
+          # Transfer the build artifact to VM
+          scp -i ~/.ssh/id_rsa "/tmp/portfolio-build-$VERSION.zip" \
+            ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }}:/tmp/
+          
+          # Deploy on VM
           ssh -i ~/.ssh/id_rsa ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} "
-            export GITHUB_REPOSITORY='${{ github.repository }}'
-            export GITHUB_TOKEN='${{ secrets.GITHUB_TOKEN }}'
-            sudo -E /opt/portfolio-scripts/deploy.sh ${{ steps.vars.outputs.version }}
+            # Stop services
+            sudo systemctl stop nginx || true
+            
+            # Extract build files
+            cd /tmp
+            sudo unzip -o portfolio-build-$VERSION.zip -d /var/www/portfolio-new
+            
+            # Replace current deployment
+            sudo rm -rf /var/www/portfolio-old
+            if [ -d /var/www/portfolio ]; then
+              sudo mv /var/www/portfolio /var/www/portfolio-old
+            fi
+            sudo mv /var/www/portfolio-new /var/www/portfolio
+            
+            # Set permissions
+            sudo chown -R www-data:www-data /var/www/portfolio
+            sudo chmod -R 755 /var/www/portfolio
+            
+            # Start services
+            sudo systemctl start nginx
+            sudo systemctl enable nginx
+            
+            # Clean up
+            rm -f /tmp/portfolio-build-$VERSION.zip
+            
+            echo '✅ Deployment completed successfully'
           "
 
       - name: Verify deployment
@@ -119,14 +187,7 @@ jobs:
       - name: Get deployment info
         id: deployment-info
         run: |
-          DEPLOYED_VERSION=$(ssh -i ~/.ssh/id_rsa ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} "
-            if [ -f /var/www/portfolio/package.json ]; then
-              grep '\"version\"' /var/www/portfolio/package.json | cut -d'\"' -f4
-            else
-              echo 'unknown'
-            fi
-          ")
-          
+          DEPLOYED_VERSION="${{ steps.vars.outputs.version }}"
           VM_IP="${{ secrets.GCP_VM_IP }}"
           
           echo "deployed_version=$DEPLOYED_VERSION" >> $GITHUB_OUTPUT
@@ -137,17 +198,27 @@ jobs:
         run: |
           echo "🔄 Deployment failed, attempting rollback..."
           ssh -i ~/.ssh/id_rsa ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} "
-            LATEST_BACKUP=\$(sudo ls -t /var/backups/portfolio/ | head -n 1)
-            if [ -n \"\$LATEST_BACKUP\" ]; then
-              echo \"Rolling back to: \$LATEST_BACKUP\"
+            if [ -d /var/www/portfolio-old ]; then
+              echo \"Rolling back to previous version\"
               sudo systemctl stop nginx || true
-              sudo rm -rf /var/www/portfolio/*
-              sudo cp -r /var/backups/portfolio/\$LATEST_BACKUP/* /var/www/portfolio/
+              sudo rm -rf /var/www/portfolio
+              sudo mv /var/www/portfolio-old /var/www/portfolio
               sudo chown -R www-data:www-data /var/www/portfolio
               sudo systemctl start nginx
               echo \"Rollback completed\"
             else
-              echo \"No backup found for rollback\"
+              LATEST_BACKUP=\$(sudo ls -t /var/backups/portfolio/ 2>/dev/null | head -n 1)
+              if [ -n \"\$LATEST_BACKUP\" ]; then
+                echo \"Rolling back to backup: \$LATEST_BACKUP\"
+                sudo systemctl stop nginx || true
+                sudo rm -rf /var/www/portfolio/*
+                sudo cp -r /var/backups/portfolio/\$LATEST_BACKUP/* /var/www/portfolio/
+                sudo chown -R www-data:www-data /var/www/portfolio
+                sudo systemctl start nginx
+                echo \"Rollback completed\"
+              else
+                echo \"No backup found for rollback\"
+              fi
             fi
           "
 
