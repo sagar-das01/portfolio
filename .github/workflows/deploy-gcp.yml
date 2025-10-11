@@ -238,9 +238,9 @@ jobs:
             sudo systemctl stop nginx || true
             
             # Create backup of current deployment
-            if [ -d /usr/share/nginx/html ] && [ \"\$(ls -A /usr/share/nginx/html 2>/dev/null)\" ]; then
-              sudo mkdir -p /var/backups/nginx-html
-              sudo cp -r /usr/share/nginx/html /var/backups/nginx-html/backup-\$(date +%Y%m%d-%H%M%S)
+            if [ -d /var/www/html ] && [ \"\$(ls -A /var/www/html 2>/dev/null)\" ]; then
+              sudo mkdir -p /var/backups/www-html
+              sudo cp -r /var/www/html /var/backups/www-html/backup-\$(date +%Y%m%d-%H%M%S)
               echo 'Current deployment backed up'
             fi
             
@@ -250,23 +250,25 @@ jobs:
             sudo mkdir -p /tmp/portfolio-extract
             sudo unzip -o portfolio-build-$VERSION.zip -d /tmp/portfolio-extract
             
-            # Clear nginx html directory and deploy new files
-            sudo rm -rf /usr/share/nginx/html/*
-            sudo cp -r /tmp/portfolio-extract/* /usr/share/nginx/html/
+            # Clear www html directory and deploy new files
+            sudo mkdir -p /var/www/html
+            sudo rm -rf /var/www/html/*
+            sudo cp -r /tmp/portfolio-extract/* /var/www/html/
             
             # Set proper permissions
-            sudo chown -R nginx:nginx /usr/share/nginx/html
-            sudo chmod -R 755 /usr/share/nginx/html
+            sudo chown -R www-data:www-data /var/www/html
+            sudo chmod -R 755 /var/www/html
             
             # Ensure index.html exists
-            if [ ! -f /usr/share/nginx/html/index.html ]; then
+            if [ ! -f /var/www/html/index.html ]; then
               echo '❌ Error: index.html not found in deployment package'
-              sudo ls -la /usr/share/nginx/html/
+              sudo ls -la /var/www/html/
               exit 1
             fi
             
             # Update nginx configuration if needed
-            sudo cp /tmp/nginx.conf /etc/nginx/conf.d/portfolio.conf 2>/dev/null || true
+            sudo cp /tmp/nginx.conf /etc/nginx/sites-available/portfolio 2>/dev/null || true
+            sudo ln -sf /etc/nginx/sites-available/portfolio /etc/nginx/sites-enabled/portfolio 2>/dev/null || true
             
             # Test nginx configuration
             sudo nginx -t
@@ -284,8 +286,8 @@ jobs:
             sudo rm -rf /tmp/portfolio-extract
             
             echo '✅ Deployment completed successfully'
-            echo 'Files deployed to: /usr/share/nginx/html'
-            sudo ls -la /usr/share/nginx/html/
+            echo 'Files deployed to: /var/www/html'
+            sudo ls -la /var/www/html/
           "
 
       - name: Verify deployment
@@ -321,19 +323,19 @@ jobs:
         run: |
           echo "🔄 Deployment failed, attempting rollback..."
           ssh -i ~/.ssh/id_rsa ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} "
-            # Look for the most recent backup in nginx-html backups
-            LATEST_BACKUP=\$(sudo ls -t /var/backups/nginx-html/ 2>/dev/null | head -n 1)
+            # Look for the most recent backup in www-html backups
+            LATEST_BACKUP=\$(sudo ls -t /var/backups/www-html/ 2>/dev/null | head -n 1)
             if [ -n \"\$LATEST_BACKUP\" ]; then
               echo \"Rolling back to backup: \$LATEST_BACKUP\"
               sudo systemctl stop nginx || true
-              sudo rm -rf /usr/share/nginx/html/*
-              sudo cp -r /var/backups/nginx-html/\$LATEST_BACKUP/* /usr/share/nginx/html/
-              sudo chown -R nginx:nginx /usr/share/nginx/html
-              sudo chmod -R 755 /usr/share/nginx/html
+              sudo rm -rf /var/www/html/*
+              sudo cp -r /var/backups/www-html/\$LATEST_BACKUP/* /var/www/html/
+              sudo chown -R www-data:www-data /var/www/html
+              sudo chmod -R 755 /var/www/html
               sudo systemctl start nginx
               echo \"Rollback completed\"
             else
-              echo \"No nginx backup found for rollback\"
+              echo \"No www-html backup found for rollback\"
               echo \"Available backups:\"
               sudo ls -la /var/backups/ 2>/dev/null || echo \"No backup directories found\"
             fi
