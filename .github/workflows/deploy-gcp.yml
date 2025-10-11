@@ -1,8 +1,10 @@
 name: Deploy to Google Cloud VM
 
 on:
-  release:
-    types: [published]
+  workflow_run:
+    workflows: ["Build and Package"]
+    types: [completed]
+    branches: [master]
   workflow_dispatch:
     inputs:
       version:
@@ -17,6 +19,7 @@ jobs:
   deploy:
     name: Deploy to Production VM
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
     steps:
       - name: Checkout code
@@ -38,10 +41,17 @@ jobs:
       - name: Prepare deployment variables
         id: vars
         run: |
-          if [ "${{ github.event_name }}" = "release" ]; then
-            VERSION="${{ github.event.release.tag_name }}"
-          else
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            # Get version from the workflow run that triggered this
+            VERSION=$(echo "${{ github.event.workflow_run.head_branch }}" | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' || echo "latest")
+            if [ "$VERSION" = "latest" ]; then
+              # Get latest release tag
+              VERSION=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases/latest" | jq -r '.tag_name')
+            fi
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="latest"
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Deploying version: $VERSION"
@@ -83,35 +93,47 @@ jobs:
           VERSION="${{ steps.vars.outputs.version }}"
           echo "Waiting for build artifacts for version: $VERSION"
           
-          # Wait up to 10 minutes for build artifacts to be available
-          for i in {1..60}; do
-            echo "Checking for build artifacts (attempt $i/60)..."
+          # Wait up to 5 minutes for build artifacts to be available
+          for i in {1..30}; do
+            echo "Checking for build artifacts (attempt $i/30)..."
             
             # Check if build artifact exists in release
-            ASSET_URL=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              "https://api.github.com/repos/${{ github.repository }}/releases/tags/$VERSION" | \
-              jq -r '.assets[] | select(.name | contains("portfolio-build")) | .browser_download_url' | head -1)
+            RELEASE_DATA=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/tags/$VERSION")
             
-            if [ "$ASSET_URL" != "null" ] && [ -n "$ASSET_URL" ]; then
+            if [ "$(echo "$RELEASE_DATA" | jq -r '.message // empty')" = "Not Found" ]; then
+              echo "❌ Release $VERSION not found"
+              exit 1
+            fi
+            
+            ASSET_URL=$(echo "$RELEASE_DATA" | jq -r '.assets[] | select(.name | contains("portfolio-build")) | .browser_download_url' | head -1)
+            
+            if [ "$ASSET_URL" != "null" ] && [ -n "$ASSET_URL" ] && [ "$ASSET_URL" != "" ]; then
               echo "✅ Build artifact found: $ASSET_URL"
               
               # Download the build artifact
               curl -L -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
                 "$ASSET_URL" -o "/tmp/portfolio-build-$VERSION.zip"
               
-              echo "✅ Build artifact downloaded successfully"
-              break
+              # Verify download
+              if [ -f "/tmp/portfolio-build-$VERSION.zip" ] && [ -s "/tmp/portfolio-build-$VERSION.zip" ]; then
+                echo "✅ Build artifact downloaded successfully ($(ls -lh /tmp/portfolio-build-$VERSION.zip | awk '{print $5}'))"
+                break
+              else
+                echo "❌ Downloaded file is empty or corrupted"
+                rm -f "/tmp/portfolio-build-$VERSION.zip"
+              fi
             else
               echo "Build artifact not yet available, waiting 10 seconds..."
+              echo "Available assets in this release:"
+              echo "$RELEASE_DATA" | jq -r '.assets[].name // "No assets found"'
               sleep 10
             fi
             
-            if [ $i -eq 60 ]; then
-              echo "❌ Timeout: Build artifact not found after 10 minutes"
-              echo "Available assets in release:"
-              curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                "https://api.github.com/repos/${{ github.repository }}/releases/tags/$VERSION" | \
-                jq -r '.assets[] | .name'
+            if [ $i -eq 30 ]; then
+              echo "❌ Timeout: Build artifact not found after 5 minutes"
+              echo "Final check - Available assets in release $VERSION:"
+              echo "$RELEASE_DATA" | jq -r '.assets[].name // "No assets found"'
               exit 1
             fi
           done
