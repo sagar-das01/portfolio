@@ -121,8 +121,9 @@ jobs:
           # Create scripts directory on VM
           ssh -i ~/.ssh/id_rsa ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} "sudo mkdir -p /opt/portfolio-scripts"
           
-          # Transfer all scripts
+          # Transfer all scripts and nginx config
           scp -i ~/.ssh/id_rsa scripts/*.sh ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }}:/tmp/
+          scp -i ~/.ssh/id_rsa nginx.conf ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }}:/tmp/
           
           # Move scripts to permanent location and set permissions
           ssh -i ~/.ssh/id_rsa ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} "
@@ -233,32 +234,58 @@ jobs:
           
           # Deploy on VM
           ssh -i ~/.ssh/id_rsa ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} "
-            # Stop services
+            # Stop nginx service
             sudo systemctl stop nginx || true
             
-            # Extract build files
-            cd /tmp
-            sudo unzip -o portfolio-build-$VERSION.zip -d /var/www/portfolio-new
-            
-            # Replace current deployment
-            sudo rm -rf /var/www/portfolio-old
-            if [ -d /var/www/portfolio ]; then
-              sudo mv /var/www/portfolio /var/www/portfolio-old
+            # Create backup of current deployment
+            if [ -d /usr/share/nginx/html ] && [ \"\$(ls -A /usr/share/nginx/html 2>/dev/null)\" ]; then
+              sudo mkdir -p /var/backups/nginx-html
+              sudo cp -r /usr/share/nginx/html /var/backups/nginx-html/backup-\$(date +%Y%m%d-%H%M%S)
+              echo 'Current deployment backed up'
             fi
-            sudo mv /var/www/portfolio-new /var/www/portfolio
             
-            # Set permissions
-            sudo chown -R www-data:www-data /var/www/portfolio
-            sudo chmod -R 755 /var/www/portfolio
+            # Extract build files to temporary location
+            cd /tmp
+            sudo rm -rf /tmp/portfolio-extract
+            sudo mkdir -p /tmp/portfolio-extract
+            sudo unzip -o portfolio-build-$VERSION.zip -d /tmp/portfolio-extract
             
-            # Start services
+            # Clear nginx html directory and deploy new files
+            sudo rm -rf /usr/share/nginx/html/*
+            sudo cp -r /tmp/portfolio-extract/* /usr/share/nginx/html/
+            
+            # Set proper permissions
+            sudo chown -R nginx:nginx /usr/share/nginx/html
+            sudo chmod -R 755 /usr/share/nginx/html
+            
+            # Ensure index.html exists
+            if [ ! -f /usr/share/nginx/html/index.html ]; then
+              echo '❌ Error: index.html not found in deployment package'
+              sudo ls -la /usr/share/nginx/html/
+              exit 1
+            fi
+            
+            # Update nginx configuration if needed
+            sudo cp /tmp/nginx.conf /etc/nginx/conf.d/portfolio.conf 2>/dev/null || true
+            
+            # Test nginx configuration
+            sudo nginx -t
+            if [ \$? -ne 0 ]; then
+              echo '❌ Nginx configuration test failed'
+              exit 1
+            fi
+            
+            # Start nginx service
             sudo systemctl start nginx
             sudo systemctl enable nginx
             
-            # Clean up
+            # Clean up temporary files
             rm -f /tmp/portfolio-build-$VERSION.zip
+            sudo rm -rf /tmp/portfolio-extract
             
             echo '✅ Deployment completed successfully'
+            echo 'Files deployed to: /usr/share/nginx/html'
+            sudo ls -la /usr/share/nginx/html/
           "
 
       - name: Verify deployment
@@ -294,27 +321,21 @@ jobs:
         run: |
           echo "🔄 Deployment failed, attempting rollback..."
           ssh -i ~/.ssh/id_rsa ${{ secrets.GCP_VM_USER }}@${{ secrets.GCP_VM_IP }} "
-            if [ -d /var/www/portfolio-old ]; then
-              echo \"Rolling back to previous version\"
+            # Look for the most recent backup in nginx-html backups
+            LATEST_BACKUP=\$(sudo ls -t /var/backups/nginx-html/ 2>/dev/null | head -n 1)
+            if [ -n \"\$LATEST_BACKUP\" ]; then
+              echo \"Rolling back to backup: \$LATEST_BACKUP\"
               sudo systemctl stop nginx || true
-              sudo rm -rf /var/www/portfolio
-              sudo mv /var/www/portfolio-old /var/www/portfolio
-              sudo chown -R www-data:www-data /var/www/portfolio
+              sudo rm -rf /usr/share/nginx/html/*
+              sudo cp -r /var/backups/nginx-html/\$LATEST_BACKUP/* /usr/share/nginx/html/
+              sudo chown -R nginx:nginx /usr/share/nginx/html
+              sudo chmod -R 755 /usr/share/nginx/html
               sudo systemctl start nginx
               echo \"Rollback completed\"
             else
-              LATEST_BACKUP=\$(sudo ls -t /var/backups/portfolio/ 2>/dev/null | head -n 1)
-              if [ -n \"\$LATEST_BACKUP\" ]; then
-                echo \"Rolling back to backup: \$LATEST_BACKUP\"
-                sudo systemctl stop nginx || true
-                sudo rm -rf /var/www/portfolio/*
-                sudo cp -r /var/backups/portfolio/\$LATEST_BACKUP/* /var/www/portfolio/
-                sudo chown -R www-data:www-data /var/www/portfolio
-                sudo systemctl start nginx
-                echo \"Rollback completed\"
-              else
-                echo \"No backup found for rollback\"
-              fi
+              echo \"No nginx backup found for rollback\"
+              echo \"Available backups:\"
+              sudo ls -la /var/backups/ 2>/dev/null || echo \"No backup directories found\"
             fi
           "
 
