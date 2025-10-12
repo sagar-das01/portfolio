@@ -96,62 +96,41 @@ jobs:
           git push origin $TAG_NAME
           echo "Created tag: $TAG_NAME"
 
-      - name: Build project
+      - name: Create GitHub Release
+        id: create-release
         if: steps.version-type.outputs.type != 'none'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          yarn build
-
-      - name: Generate Release Notes
-        id: release-notes
-        if: steps.version-type.outputs.type != 'none'
-        run: |
-          PR_TITLE="${{ github.event.pull_request.title }}"
-          PR_BODY="${{ github.event.pull_request.body }}"
-          PR_NUMBER="${{ github.event.pull_request.number }}"
-          BRANCH_NAME="${{ github.event.pull_request.head.ref }}"
+          TAG_NAME="${{ steps.create-tag.outputs.tag }}"
           
           cat > release_notes.md << EOF
           ## What's Changed
           
-          **$PR_TITLE** (#$PR_NUMBER)
+          **${{ github.event.pull_request.title }}** (#${{ github.event.pull_request.number }})
           
           ### Changes in this release:
-          $PR_BODY
+          ${{ github.event.pull_request.body }}
           
           ### Branch Information:
-          - **Source Branch:** \`$BRANCH_NAME\`
+          - **Source Branch:** \`${{ github.event.pull_request.head.ref }}\`
           - **Version Type:** \`${{ steps.version-type.outputs.type }}\`
           - **Previous Version:** \`${{ steps.current-version.outputs.current }}\`
-          - **New Version:** \`${{ steps.create-tag.outputs.tag }}\`
+          - **New Version:** \`$TAG_NAME\`
           
           ---
           
-          **Full Changelog:** https://github.com/${{ github.repository }}/compare/v${{ steps.current-version.outputs.current }}...${{ steps.create-tag.outputs.tag }}
+          **Full Changelog:** https://github.com/${{ github.repository }}/compare/v${{ steps.current-version.outputs.current }}...$TAG_NAME
           EOF
-
-      - name: Create GitHub Release
-        if: steps.version-type.outputs.type != 'none'
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ steps.create-tag.outputs.tag }}
-          release_name: Release ${{ steps.create-tag.outputs.tag }}
-          body_path: release_notes.md
-          draft: false
-          prerelease: false
-
-      - name: Upload build artifacts to release
-        if: steps.version-type.outputs.type != 'none'
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create-release.outputs.upload_url }}
-          asset_path: ./build
-          asset_name: portfolio-build-${{ steps.create-tag.outputs.tag }}.zip
-          asset_content_type: application/zip
-        continue-on-error: true
+          
+          # Create release using GitHub CLI to ensure proper event triggering for build-release.yml
+          gh release create "$TAG_NAME" \
+            --title "Release $TAG_NAME" \
+            --notes-file release_notes.md \
+            --latest
+          
+          echo "✅ Release $TAG_NAME created successfully"
+          echo "⏳ Build and Package workflow will be triggered automatically"
 
       - name: Summary
         if: steps.version-type.outputs.type != 'none'
@@ -165,8 +144,9 @@ jobs:
           echo "- **Release Created:** ✅" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📋 Next Steps:" >> $GITHUB_STEP_SUMMARY
-          echo "- Check the [Releases page](https://github.com/${{ github.repository }}/releases) for the new release" >> $GITHUB_STEP_SUMMARY
-          echo "- The GitHub Pages deployment will be triggered automatically" >> $GITHUB_STEP_SUMMARY
+          echo "- Build and Package workflow will start automatically" >> $GITHUB_STEP_SUMMARY
+          echo "- Deployment to GCP will follow after build completion" >> $GITHUB_STEP_SUMMARY
+          echo "- Check the [Actions tab](https://github.com/${{ github.repository }}/actions) to monitor progress" >> $GITHUB_STEP_SUMMARY
 
       - name: No version bump needed
         if: steps.version-type.outputs.type == 'none'
